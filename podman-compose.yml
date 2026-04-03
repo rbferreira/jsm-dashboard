@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  dashboard:
+    build: .
+    container_name: sd-dashboard
+    ports:
+      - "8501:8501"
+    env_file: .env
+    volumes:
+      - ./output:/app/output
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
