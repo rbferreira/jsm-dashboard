@@ -139,29 +139,6 @@ hr {
     margin: 0.6rem 0 !important;
 }
 
-/* ── Expander panels (catalog) ─────────────────────────────────────────── */
-[data-testid="stExpander"] {
-    background: linear-gradient(145deg, #1e2235 0%, #181b28 100%);
-    border: 1px solid rgba(59, 130, 246, 0.08);
-    border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-    margin-bottom: 0.5rem;
-}
-
-/* ── Download buttons (catalog) ────────────────────────────────────────── */
-[data-testid="stDownloadButton"] > button {
-    background: linear-gradient(145deg, #1e2235 0%, #1a1d2e 100%) !important;
-    border: 1px solid rgba(59, 130, 246, 0.1) !important;
-    border-radius: 10px !important;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    transition: all 0.2s ease;
-}
-[data-testid="stDownloadButton"] > button:hover {
-    border-color: rgba(59, 130, 246, 0.3) !important;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
-    transform: translateY(-1px);
-}
-
 </style>
 """
 

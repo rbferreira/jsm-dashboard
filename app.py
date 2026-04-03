@@ -1,9 +1,7 @@
 """Streamlit dashboard: SDL Service Desk metrics from Jira."""
 
-import json
 import os
 from datetime import date, timedelta
-from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -11,13 +9,11 @@ from dotenv import load_dotenv
 import jira_client
 from ui.styles import inject_styles
 from ui.charts import COLORS, pie, bar_h, grouped_bar, line, donut, bar_v, csat_bar
-from ui.components import top_n, trunc, render_stars, kpi_card
+from ui.components import top_n, render_stars, kpi_card
 
 load_dotenv()
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-OUTPUT_DIR = Path(__file__).parent / "output"
-
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 
 # Period pill label → internal period key
@@ -110,213 +106,170 @@ if period == "custom":
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
-tab_metrics, tab_catalog = st.tabs(["Métricas", "Catálogo de Serviços"])
-
 # ═════════════════════════ MÉTRICAS ══════════════════════════════════════════
-with tab_metrics:
-    with st.spinner("Carregando métricas..."):
-        try:
-            data = fetch_metrics(period, date_from, date_to, assignee_filter)
-            error = data.get("error")
-        except Exception:
-            data = {}
-            error = None
-            st.error("Erro ao carregar dados do Jira. Verifique a conexão e as credenciais.")
-            st.stop()
-
-    if error:
-        st.error(f"Erro ao carregar métricas: {error}")
+with st.spinner("Carregando métricas..."):
+    try:
+        data = fetch_metrics(period, date_from, date_to, assignee_filter)
+        error = data.get("error")
+    except Exception:
+        data = {}
+        error = None
+        st.error("Erro ao carregar dados do Jira. Verifique a conexão e as credenciais.")
         st.stop()
 
-    kpi = data.get("kpi", {})
-    csat = data.get("csat", {"avg": 0, "count": 0})
-    csat_avg = csat.get("avg", 0)
-    stars_html = render_stars(csat_avg) if csat_avg else ""
+if error:
+    st.error(f"Erro ao carregar métricas: {error}")
+    st.stop()
 
-    # ── KPI cards ─────────────────────────────────────────────────────────────
-    st.markdown(
-        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.75rem;margin-bottom:0.85rem">'
-        + kpi_card("Total no período", kpi.get("total_created", 0))
-        + kpi_card("Não fechados no período", kpi.get("total_open", 0), color="#ef4444")
-        + kpi_card("Resolvidos no período", kpi.get("total_closed", 0), color="#22c55e")
-        + kpi_card("Tempo médio resolução", f"{kpi.get('avg_resolution_days', 0)}d", color="#22d3ee")
-        + kpi_card(
-            f"CSAT médio {stars_html}",
-            f"{csat_avg:.1f}",
-            color="#f59e0b",
-            extra=f"{csat.get('count', 0)} avaliações",
-        )
-        + "</div>",
-        unsafe_allow_html=True,
+kpi = data.get("kpi", {})
+csat = data.get("csat", {"avg": 0, "count": 0})
+csat_avg = csat.get("avg", 0)
+stars_html = render_stars(csat_avg) if csat_avg else ""
+
+# ── KPI cards ─────────────────────────────────────────────────────────────
+st.markdown(
+    '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.75rem;margin-bottom:0.85rem">'
+    + kpi_card("Total no período", kpi.get("total_created", 0))
+    + kpi_card("Não fechados no período", kpi.get("total_open", 0), color="#ef4444")
+    + kpi_card("Resolvidos no período", kpi.get("total_closed", 0), color="#22c55e")
+    + kpi_card("Tempo médio resolução", f"{kpi.get('avg_resolution_days', 0)}d", color="#22d3ee")
+    + kpi_card(
+        f"CSAT médio {stars_html}",
+        f"{csat_avg:.1f}",
+        color="#f59e0b",
+        extra=f"{csat.get('count', 0)} avaliações",
     )
+    + "</div>",
+    unsafe_allow_html=True,
+)
 
-    # ── Prepare chart data ────────────────────────────────────────────────────
-    by_cat = top_n(data.get("by_category", {}))
-    by_grp = data.get("by_group", {})
-    by_assignee = data.get("by_assignee", {})
-    by_day = data.get("by_day", {})
-    closed_by_day = data.get("closed_by_day", {})
-    by_priority = data.get("by_priority", {})
-    priority_meta = data.get("priority_meta", [])
-    p_color_map = {p["name"]: p["color"] for p in priority_meta}
+# ── Prepare chart data ────────────────────────────────────────────────────
+by_cat = top_n(data.get("by_category", {}))
+by_grp = data.get("by_group", {})
+by_assignee = data.get("by_assignee", {})
+by_day = data.get("by_day", {})
+closed_by_day = data.get("closed_by_day", {})
+by_priority = data.get("by_priority", {})
+priority_meta = data.get("priority_meta", [])
+p_color_map = {p["name"]: p["color"] for p in priority_meta}
 
-    try:
-        obm = fetch_open_by_month()
-    except Exception:
-        obm = []
+try:
+    obm = fetch_open_by_month()
+except Exception:
+    obm = []
 
-    try:
-        cbm = fetch_csat_by_month()
-    except Exception:
-        cbm = []
+try:
+    cbm = fetch_csat_by_month()
+except Exception:
+    cbm = []
 
-    # Build a list of (render_fn, fallback_msg) for each chart slot
-    def _render_cat(col):
-        if by_cat:
-            col.plotly_chart(pie(
-                list(by_cat.keys()), list(by_cat.values()),
-                "Chamados por Categoria",
-                "Distribuição por categoria — identifica o que mais demanda o time",
-            ), width="stretch")
-        else:
-            col.info("Sem dados de categoria")
 
-    def _render_grp(col):
-        if by_grp:
-            col.plotly_chart(pie(
-                list(by_grp.keys()), list(by_grp.values()),
-                "Chamados por Grupo",
-                "Volume por grupo do portal de serviços — visão de área de suporte",
-            ), width="stretch")
-        else:
-            col.info("Sem dados de grupo")
-
-    def _render_assignee(col):
-        if by_assignee:
-            sorted_a = sorted(by_assignee.items(), key=lambda x: x[1])
-            col.plotly_chart(bar_h(
-                [k for k, _ in sorted_a], [v for _, v in sorted_a],
-                "Chamados por Analista",
-                "Volume atribuído a cada analista — apoia gestão de capacidade",
-            ), width="stretch")
-        else:
-            col.info("Sem dados de analista")
-
-    def _render_opened_closed(col):
-        if by_day or closed_by_day:
-            all_days = sorted(set(list(by_day.keys()) + list(closed_by_day.keys())))
-            col.plotly_chart(grouped_bar(
-                all_days,
-                [by_day.get(d, 0) for d in all_days],
-                [closed_by_day.get(d, 0) for d in all_days],
-                "Abertos vs Fechados por Dia",
-                "Comparativo de entradas e resoluções no período",
-            ), width="stretch")
-        else:
-            col.info("Sem dados diários")
-
-    def _render_trend(col):
-        if by_day:
-            all_days_s = sorted(by_day.keys())
-            col.plotly_chart(line(
-                all_days_s, [by_day[d] for d in all_days_s],
-                "Volume Diário (Tendência)",
-                "Evolução diária de chamados criados — identifica picos e sazonalidade",
-            ), width="stretch")
-        else:
-            col.info("Sem dados diários")
-
-    def _render_priority(col):
-        if by_priority:
-            p_labels = list(by_priority.keys())
-            p_values = list(by_priority.values())
-            p_colors = [p_color_map.get(lbl, "#94a3b8") for lbl in p_labels]
-            col.plotly_chart(donut(
-                p_labels, p_values, p_colors,
-                "Chamados por Prioridade",
-                "Breakdown por prioridade — útil para avaliar impacto e urgência",
-            ), width="stretch")
-        else:
-            col.info("Sem dados de prioridade")
-
-    def _render_open_month(col):
-        if obm:
-            col.plotly_chart(bar_v(
-                [m["label"] for m in obm], [m["count"] for m in obm],
-                [COLORS[0]] * len(obm),
-                "Chamados Abertos por Mês",
-                "Tickets criados em cada mês que ainda estão em aberto hoje",
-            ), width="stretch")
-        else:
-            col.info("Sem dados de abertos por mês")
-
-    def _render_csat_month(col):
-        if cbm:
-            col.plotly_chart(csat_bar(
-                [m["label"] for m in cbm], [m["avg"] for m in cbm],
-                "CSAT por Mês",
-                "Nota média de satisfação por mês nos últimos 6 meses",
-            ), width="stretch")
-        else:
-            col.info("Sem dados de CSAT")
-
-    charts = [
-        _render_cat, _render_grp, _render_assignee, _render_opened_closed,
-        _render_trend, _render_priority, _render_open_month, _render_csat_month,
-    ]
-
-    # ── Render charts in rows of n_cols ───────────────────────────────────────
-    for row_start in range(0, len(charts), n_cols):
-        row_charts = charts[row_start:row_start + n_cols]
-        cols = st.columns(n_cols)
-        for i, render_fn in enumerate(row_charts):
-            render_fn(cols[i])
-
-# ═════════════════════════ CATÁLOGO ══════════════════════════════════════════
-with tab_catalog:
-    catalog_path = OUTPUT_DIR / "catalog.json"
-    catalog_md_path = OUTPUT_DIR / "catalog.md"
-    catalog_csv_path = OUTPUT_DIR / "catalog.csv"
-
-    if not catalog_path.exists():
-        st.info("Catálogo não gerado ainda. Execute catalog_generator.py para gerar.")
+# ── Chart render functions ────────────────────────────────────────────────
+def _render_cat(col):
+    if by_cat:
+        col.plotly_chart(pie(
+            list(by_cat.keys()), list(by_cat.values()),
+            "Chamados por Categoria",
+            "Distribuição por categoria — identifica o que mais demanda o time",
+        ), width="stretch")
     else:
-        try:
-            with open(catalog_path, encoding="utf-8") as f:
-                catalog_data = json.load(f)
+        col.info("Sem dados de categoria")
 
-            col_e1, col_e2, _ = st.columns([1, 1, 6])
-            if catalog_csv_path.exists():
-                col_e1.download_button(
-                    "Exportar CSV",
-                    data=catalog_csv_path.read_bytes(),
-                    file_name="catalog.csv",
-                    mime="text/csv",
-                )
-            if catalog_md_path.exists():
-                col_e2.download_button(
-                    "Exportar Markdown",
-                    data=catalog_md_path.read_bytes(),
-                    file_name="catalog.md",
-                    mime="text/markdown",
-                )
 
-            st.divider()
-            st.subheader("Hierarquia de Serviços")
-            for cat in catalog_data.get("catalog", []):
-                with st.expander(f"**{cat['name']}** — {cat.get('description', '')}"):
-                    for grp in cat.get("groups", []):
-                        st.markdown(f"**{grp['name']}**")
-                        for t in grp.get("types", []):
-                            st.markdown(f"- {t['name']}")
+def _render_grp(col):
+    if by_grp:
+        col.plotly_chart(pie(
+            list(by_grp.keys()), list(by_grp.values()),
+            "Chamados por Grupo",
+            "Volume por grupo do portal de serviços — visão de área de suporte",
+        ), width="stretch")
+    else:
+        col.info("Sem dados de grupo")
 
-            tickets = catalog_data.get("tickets", [])
-            if tickets:
-                st.divider()
-                st.subheader("Chamados Categorizados")
-                import pandas as pd
-                df = pd.DataFrame(tickets)
-                st.dataframe(df, width="stretch", hide_index=True)
 
-        except Exception as exc:
-            st.error(f"Erro ao carregar catálogo: {exc}")
+def _render_assignee(col):
+    if by_assignee:
+        sorted_a = sorted(by_assignee.items(), key=lambda x: x[1])
+        col.plotly_chart(bar_h(
+            [k for k, _ in sorted_a], [v for _, v in sorted_a],
+            "Chamados por Analista",
+            "Volume atribuído a cada analista — apoia gestão de capacidade",
+        ), width="stretch")
+    else:
+        col.info("Sem dados de analista")
+
+
+def _render_opened_closed(col):
+    if by_day or closed_by_day:
+        all_days = sorted(set(list(by_day.keys()) + list(closed_by_day.keys())))
+        col.plotly_chart(grouped_bar(
+            all_days,
+            [by_day.get(d, 0) for d in all_days],
+            [closed_by_day.get(d, 0) for d in all_days],
+            "Abertos vs Fechados por Dia",
+            "Comparativo de entradas e resoluções no período",
+        ), width="stretch")
+    else:
+        col.info("Sem dados diários")
+
+
+def _render_trend(col):
+    if by_day:
+        all_days_s = sorted(by_day.keys())
+        col.plotly_chart(line(
+            all_days_s, [by_day[d] for d in all_days_s],
+            "Volume Diário (Tendência)",
+            "Evolução diária de chamados criados — identifica picos e sazonalidade",
+        ), width="stretch")
+    else:
+        col.info("Sem dados diários")
+
+
+def _render_priority(col):
+    if by_priority:
+        p_labels = list(by_priority.keys())
+        p_values = list(by_priority.values())
+        p_colors = [p_color_map.get(lbl, "#94a3b8") for lbl in p_labels]
+        col.plotly_chart(donut(
+            p_labels, p_values, p_colors,
+            "Chamados por Prioridade",
+            "Breakdown por prioridade — útil para avaliar impacto e urgência",
+        ), width="stretch")
+    else:
+        col.info("Sem dados de prioridade")
+
+
+def _render_open_month(col):
+    if obm:
+        col.plotly_chart(bar_v(
+            [m["label"] for m in obm], [m["count"] for m in obm],
+            [COLORS[0]] * len(obm),
+            "Chamados Abertos por Mês",
+            "Tickets criados em cada mês que ainda estão em aberto hoje",
+        ), width="stretch")
+    else:
+        col.info("Sem dados de abertos por mês")
+
+
+def _render_csat_month(col):
+    if cbm:
+        col.plotly_chart(csat_bar(
+            [m["label"] for m in cbm], [m["avg"] for m in cbm],
+            "CSAT por Mês",
+            "Nota média de satisfação por mês nos últimos 6 meses",
+        ), width="stretch")
+    else:
+        col.info("Sem dados de CSAT")
+
+
+charts = [
+    _render_cat, _render_grp, _render_assignee, _render_opened_closed,
+    _render_trend, _render_priority, _render_open_month, _render_csat_month,
+]
+
+# ── Render charts in rows of n_cols ───────────────────────────────────────
+for row_start in range(0, len(charts), n_cols):
+    row_charts = charts[row_start:row_start + n_cols]
+    cols = st.columns(n_cols)
+    for i, render_fn in enumerate(row_charts):
+        render_fn(cols[i])
